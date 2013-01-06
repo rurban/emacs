@@ -3392,6 +3392,60 @@ allocate_buffer (void)
   return b;
 }
 
+
+static struct Lisp_Vector *
+allocate_record (int count)
+{
+  if (count >= (1 << PSEUDOVECTOR_SIZE_BITS))
+    error ("Record too large");
+
+  struct Lisp_Vector *p = allocate_vector (count);
+  XSETPVECTYPE (p, PVEC_RECORD);
+  return p;
+}
+
+
+DEFUN ("make-record", Fmake_record, Smake_record, 3, 3, 0,
+       doc: /* Create a new record of type TYPE with SLOTS elements, each initialized to INIT.  */)
+  (Lisp_Object type, Lisp_Object slots, Lisp_Object init)
+{
+  Lisp_Object record;
+  ptrdiff_t size, i;
+  struct Lisp_Vector *p;
+
+  CHECK_RECORD_TYPE (type);
+  CHECK_NATNUM (slots);
+
+  size = XFASTINT (slots) + 1;
+  p = allocate_record (size);
+  p->contents[0] = type;
+  for (i = 1; i < size; i++)
+    p->contents[i] = init;
+
+  XSETVECTOR (record, p);
+  return record;
+}
+
+
+DEFUN ("record", Frecord, Srecord, 1, MANY, 0,
+       doc: /* Return a newly created record of type TYPE the rest of the arguments as slots.
+Any number of slots, even zero slots, are allowed.
+usage: (record TYPE &rest SLOTS)  */)
+  (ptrdiff_t nargs, Lisp_Object *args)
+{
+  struct Lisp_Vector *p = allocate_record (nargs);
+  Lisp_Object type = args[0];
+  Lisp_Object record;
+
+  CHECK_RECORD_TYPE (type);
+  p->contents[0] = type;
+  memcpy (p->contents + 1, args + 1, (nargs - 1) * sizeof *args);
+
+  XSETVECTOR (record, p);
+  return record;
+}
+
+
 DEFUN ("make-vector", Fmake_vector, Smake_vector, 2, 2, 0,
        doc: /* Return a newly created vector of length LENGTH, with each element being INIT.
 See also the function `vector'.  */)
@@ -5532,7 +5586,7 @@ purecopy (Lisp_Object obj)
       struct Lisp_Hash_Table *h = purecopy_hash_table (table);
       XSET_HASH_TABLE (obj, h);
     }
-  else if (COMPILEDP (obj) || VECTORP (obj))
+  else if (COMPILEDP (obj) || VECTORP (obj) || RECORDP (obj))
     {
       struct Lisp_Vector *objp = XVECTOR (obj);
       ptrdiff_t nbytes = vector_nbytes (objp);
@@ -7461,10 +7515,12 @@ The time is in seconds as a floating point value.  */);
   defsubr (&Scons);
   defsubr (&Slist);
   defsubr (&Svector);
+  defsubr (&Srecord);
   defsubr (&Sbool_vector);
   defsubr (&Smake_byte_code);
   defsubr (&Smake_list);
   defsubr (&Smake_vector);
+  defsubr (&Smake_record);
   defsubr (&Smake_string);
   defsubr (&Smake_bool_vector);
   defsubr (&Smake_symbol);
