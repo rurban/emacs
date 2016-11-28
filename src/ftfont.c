@@ -34,6 +34,7 @@ along with GNU Emacs.  If not, see <http://www.gnu.org/licenses/>.  */
 #include "composite.h"
 #include "font.h"
 #include "ftfont.h"
+#include "pdumper.h"
 
 static struct font_driver const ftfont_driver;
 
@@ -2722,6 +2723,8 @@ static struct font_driver const ftfont_driver =
   .combining_capability = ftfont_combining_capability,
   };
 
+static void syms_of_ftfont_for_pdumper (void);
+
 void
 syms_of_ftfont (void)
 {
@@ -2745,5 +2748,13 @@ syms_of_ftfont (void)
   staticpro (&ft_face_cache);
   ft_face_cache = Qnil;
 
+  pdumper_do_now_and_after_load (syms_of_ftfont_for_pdumper);
+}
+
+static void
+syms_of_ftfont_for_pdumper (void)
+{
+  PDUMPER_RESET_LV (ft_face_cache, Qnil);
+  /*ftfont_driver.type = Qfreetype;*/
   register_font_driver (&ftfont_driver, NULL);
 }

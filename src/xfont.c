@@ -31,6 +31,7 @@ along with GNU Emacs.  If not, see <http://www.gnu.org/licenses/>.  */
 #include "character.h"
 #include "charset.h"
 #include "font.h"
+#include "pdumper.h"
 
 
 /* X core font driver.  */
@@ -1094,6 +1095,8 @@ struct font_driver const xfont_driver =
   .check = xfont_check,
   };
 
+static void syms_of_xfont_for_pdumper (void);
+
 void
 syms_of_xfont (void)
 {
@@ -1101,5 +1104,11 @@ syms_of_xfont (void)
   xfont_scripts_cache = CALLN (Fmake_hash_table, QCtest, Qequal);
   staticpro (&xfont_scratch_props);
   xfont_scratch_props = Fmake_vector (make_number (8), Qnil);
+  pdumper_do_now_and_after_load (syms_of_xfont_for_pdumper);
+}
+
+static void
+syms_of_xfont_for_pdumper (void)
+{
   register_font_driver (&xfont_driver, NULL);
 }

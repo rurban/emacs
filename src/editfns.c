@@ -224,7 +224,7 @@ tzlookup (Lisp_Object zone, bool settz)
 }
 
 void
-init_editfns (bool dumping)
+init_editfns (void)
 {
 #if !defined CANNOT_DUMP && defined HAVE_TZSET
   /* A valid but unlikely setting for the TZ environment variable.
@@ -240,10 +240,9 @@ init_editfns (bool dumping)
   /* Set up system_name even when dumping.  */
   init_and_cache_system_name ();
 
-#ifndef CANNOT_DUMP
   /* When just dumping out, set the time zone to a known unlikely value
      and skip the rest of this function.  */
-  if (dumping)
+  if (will_dump_with_unexec)
     {
 # ifdef HAVE_TZSET
       xputenv (dump_tz_string);
@@ -251,17 +250,17 @@ init_editfns (bool dumping)
 # endif
       return;
     }
-#endif
 
   char *tz = getenv ("TZ");
 
-#if !defined CANNOT_DUMP && defined HAVE_TZSET
+#if defined HAVE_TZSET
   /* If the execution TZ happens to be the same as the dump TZ,
      change it to some other value and then change it back,
      to force the underlying implementation to reload the TZ info.
      This is needed on implementations that load TZ info from files,
      since the TZ file contents may differ between dump and execution.  */
-  if (tz && strcmp (tz, &dump_tz_string[tzeqlen]) == 0)
+  if (dumped_with_unexec &&
+      tz && strcmp (tz, &dump_tz_string[tzeqlen]) == 0)
     {
       ++*tz;
       tzset ();
@@ -1343,7 +1342,7 @@ of the user with that uid, or nil if there is no such user.  */)
      (That can happen if Emacs is dumpable
      but you decide to run `temacs -l loadup' and not dump.  */
   if (NILP (Vuser_login_name))
-    init_editfns (false);
+    init_editfns ();
 
   if (NILP (uid))
     return Vuser_login_name;
@@ -1366,7 +1365,7 @@ This ignores the environment variables LOGNAME and USER, so it differs from
      (That can happen if Emacs is dumpable
      but you decide to run `temacs -l loadup' and not dump.  */
   if (NILP (Vuser_login_name))
-    init_editfns (false);
+    init_editfns ();
   return Vuser_real_login_name;
 }
 

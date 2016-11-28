@@ -24,6 +24,7 @@ along with GNU Emacs.  If not, see <http://www.gnu.org/licenses/>.  */
 #include "process.h"
 #include "gnutls.h"
 #include "coding.h"
+#include "pdumper.h"
 
 #ifdef HAVE_GNUTLS
 
@@ -1735,6 +1736,7 @@ syms_of_gnutls (void)
         );
 #ifdef HAVE_GNUTLS
   gnutls_global_initialized = 0;
+  PDUMPER_IGNORE (gnutls_global_initialized);
 
   DEFSYM (Qgnutls_code, "gnutls-code");
   DEFSYM (Qgnutls_anon, "gnutls-anon");

@@ -1215,7 +1215,7 @@ document xwhichsymbols
   maximum number of symbols referencing it to produce.
 end
 
-# Show Lisp backtrace after normal backtrace.
+# # Show Lisp backtrace after normal backtrace.
 define hookpost-backtrace
   set $bt = backtrace_top ()
   if backtrace_p ($bt)

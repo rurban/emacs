@@ -35,6 +35,7 @@ along with GNU Emacs.  If not, see <http://www.gnu.org/licenses/>.  */
 #include "intervals.h"
 #include "window.h"
 #include "puresize.h"
+#include "pdumper.h"
 
 static void sort_vector_copy (Lisp_Object, ptrdiff_t,
 			      Lisp_Object *restrict, Lisp_Object *restrict);
@@ -2719,7 +2720,7 @@ suppressed.  */)
 
       /* This is to make sure that loadup.el gives a clear picture
 	 of what files are preloaded and when.  */
-      if (! NILP (Vpurify_flag))
+      if (will_dump)
 	error ("(require %s) while preparing to dump",
 	       SDATA (SYMBOL_NAME (feature)));
 
@@ -3626,7 +3627,7 @@ hashfn_eq (struct hash_table_test *ht, Lisp_Object key)
    `equal' to compare keys.  The hash code returned is guaranteed to fit
    in a Lisp integer.  */
 
-static EMACS_UINT
+EMACS_UINT
 hashfn_equal (struct hash_table_test *ht, Lisp_Object key)
 {
   return sxhash (key, 0);
@@ -3636,7 +3637,7 @@ hashfn_equal (struct hash_table_test *ht, Lisp_Object key)
    `eql' to compare keys.  The hash code returned is guaranteed to fit
    in a Lisp integer.  */
 
-static EMACS_UINT
+EMACS_UINT
 hashfn_eql (struct hash_table_test *ht, Lisp_Object key)
 {
   return FLOATP (key) ? hashfn_equal (ht, key) : hashfn_eq (ht, key);
@@ -3874,6 +3875,51 @@ maybe_resize_hash_table (struct Lisp_Hash_Table *h)
     }
 }
 
+static bool
+hash_rehash_needed_p (const struct Lisp_Hash_Table *h)
+{
+  return h->count < 0;
+}
+
+static void
+hash_table_rehash (struct Lisp_Hash_Table *h)
+{
+  ptrdiff_t size = ASIZE (h->next);
+  Lisp_Object hash = h->hash;
+  Lisp_Object kv = h->key_and_value;
+  for (ptrdiff_t i = 0; i < size; ++i)
+    if (!NILP (AREF (hash, i)))
+      {
+        Lisp_Object key = AREF (kv, 2*i);
+        EMACS_UINT hash_code = h->test.hashfn (&h->test, key);
+        ASET (hash, i, make_number (hash_code));
+      }
+  Lisp_Object index = h->index;
+  Ffillarray (index, Qnil);
+  Lisp_Object next = h->next;
+  for (ptrdiff_t i = 0; i < size; ++i)
+    if (!NILP (AREF (hash, i)))
+      {
+        EMACS_UINT hash_code = XUINT (AREF (hash, i));
+        ptrdiff_t start_of_bucket = hash_code % ASIZE (index);
+        ASET (next, i, AREF (index, start_of_bucket));
+        ASET (index, start_of_bucket, make_number (i));
+        eassert (!EQ (AREF (next, i), make_number (i))); /* Stop loops.  */
+      }
+}
+
+static void
+hash_rehash_if_needed (struct Lisp_Hash_Table *h)
+{
+  if (hash_rehash_needed_p (h))
+    {
+      hash_table_rehash (h);
+      /* Do last so that if we're interrupted, we retry on next access. */
+      eassert (h->count < 0);
+      h->count = -h->count;
+      eassert (!hash_rehash_needed_p (h));
+    }
+}
 
 /* Lookup KEY in hash table H.  If HASH is non-null, return in *HASH
    the hash code of KEY.  Value is the index of the entry in H
@@ -3884,6 +3930,8 @@ hash_lookup (struct Lisp_Hash_Table *h, Lisp_Object key, EMACS_UINT *hash)
 {
   EMACS_UINT hash_code;
   ptrdiff_t start_of_bucket, i;
+
+  hash_rehash_if_needed (h);
 
   hash_code = h->test.hashfn (&h->test, key);
   eassert ((hash_code & ~INTMASK) == 0);
@@ -3912,6 +3960,8 @@ hash_put (struct Lisp_Hash_Table *h, Lisp_Object key, Lisp_Object value,
 	  EMACS_UINT hash)
 {
   ptrdiff_t start_of_bucket, i;
+
+  hash_rehash_if_needed (h);
 
   eassert ((hash & ~INTMASK) == 0);
 
@@ -3983,6 +4033,9 @@ hash_remove_from_table (struct Lisp_Hash_Table *h, Lisp_Object key)
 static void
 hash_clear (struct Lisp_Hash_Table *h)
 {
+  if (CONSP (h->index))
+    h->index = CDR (h->index);
+
   if (h->count > 0)
     {
       ptrdiff_t i, size = HASH_TABLE_SIZE (h);
@@ -4017,6 +4070,8 @@ hash_clear (struct Lisp_Hash_Table *h)
 static bool
 sweep_weak_table (struct Lisp_Hash_Table *h, bool remove_entries_p)
 {
+  eassert (!hash_rehash_needed_p (h));
+
   ptrdiff_t n = gc_asize (h->index);
   bool marked = false;
 
@@ -4099,9 +4154,17 @@ sweep_weak_table (struct Lisp_Hash_Table *h, bool remove_entries_p)
    current garbage collection.  Remove weak tables that don't survive
    from Vweak_hash_tables.  Called from gc_sweep.  */
 
+static bool
+ht_marked_p (struct Lisp_Hash_Table *h)
+{
+  return pdumper_object_p (h)
+    ? pdumper_marked_p (h)
+    : !!(h->header.size & ARRAY_MARK_FLAG);
+}
+
 NO_INLINE /* For better stack traces */
 void
-sweep_weak_hash_tables (void)
+mark_and_sweep_weak_hash_tables (void)
 {
   struct Lisp_Hash_Table *h, *used, *next;
   bool marked;
@@ -4117,7 +4180,7 @@ sweep_weak_hash_tables (void)
       marked = 0;
       for (h = weak_hash_tables; h; h = h->next_weak)
 	{
-	  if (h->header.size & ARRAY_MARK_FLAG)
+          if (ht_marked_p (h))
 	    marked |= sweep_weak_table (h, 0);
 	}
     }
@@ -4128,7 +4191,7 @@ sweep_weak_hash_tables (void)
     {
       next = h->next_weak;
 
-      if (h->header.size & ARRAY_MARK_FLAG)
+      if (ht_marked_p (h))
 	{
 	  /* TABLE is marked as used.  Sweep its contents.  */
 	  if (h->count > 0)
@@ -4972,9 +5035,14 @@ disregarding any coding systems.  If nil, use the current buffer.  */ )
 }
 
 
+static void syms_of_fns_for_pdumper (void);
+
 void
 syms_of_fns (void)
 {
+  /* Not staticpro!  */
+  pdumper_remember_lv_raw_ptr (&weak_hash_tables, Lisp_Vectorlike);
+
   DEFSYM (Qmd5,    "md5");
   DEFSYM (Qsha1,   "sha1");
   DEFSYM (Qsha224, "sha224");
@@ -5139,4 +5207,20 @@ this variable.  */);
   defsubr (&Ssecure_hash);
   defsubr (&Sbuffer_hash);
   defsubr (&Slocale_info);
+
+  pdumper_do_now_and_after_load (syms_of_fns_for_pdumper);
+}
+
+static void
+syms_of_fns_for_pdumper (void)
+{
+  /* Rehash weak tables eagerly on dump load so that we don't have to
+     support running hash_rehash_if_needed during GC.  (Rehashing can
+     invoke user-defined code, and we can't support running arbitrary
+     user code during GC.  */
+  if (dumped_with_pdumper)
+    for (struct Lisp_Hash_Table *ht = weak_hash_tables;
+         ht != NULL;
+         ht = ht->next_weak)
+      hash_rehash_if_needed (ht);
 }

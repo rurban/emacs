@@ -29,6 +29,7 @@ along with GNU Emacs.  If not, see <http://www.gnu.org/licenses/>.  */
 #include "keyboard.h"
 #include "dispextern.h"
 #include "buffer.h"
+#include "pdumper.h"
 
 /* Chain of condition and catch handlers currently in effect.  */
 
@@ -79,10 +80,6 @@ static EMACS_INT when_entered_debugger;
    Fsignal.  */
 /* FIXME: We should probably get rid of this!  */
 Lisp_Object Vsignaling_function;
-
-/* If non-nil, Lisp code must not be run since some part of Emacs is in
-   an inconsistent state.  Currently unused.  */
-Lisp_Object inhibit_lisp_code;
 
 /* These would ordinarily be static, but they need to be visible to GDB.  */
 bool backtrace_p (union specbinding *) EXTERNALLY_VISIBLE;
@@ -220,18 +217,25 @@ near_C_stack_top (void)
   return backtrace_args (backtrace_top ());
 }
 
+static void init_eval_once_for_pdumper (void);
+
 void
 init_eval_once (void)
 {
-  enum { size = 50 };
-  union specbinding *pdlvec = xmalloc ((size + 1) * sizeof *specpdl);
-  specpdl_size = size;
-  specpdl = specpdl_ptr = pdlvec + 1;
   /* Don't forget to update docs (lispref node "Local Variables").  */
   max_specpdl_size = 1300; /* 1000 is not enough for CEDET's c-by.el.  */
   max_lisp_eval_depth = 800;
-
   Vrun_hooks = Qnil;
+  pdumper_do_now_and_after_load (init_eval_once_for_pdumper);
+}
+
+static void
+init_eval_once_for_pdumper (void)
+{
+  enum { size = 50 };
+  union specbinding *pdlvec = malloc ((size + 1) * sizeof *specpdl);
+  specpdl_size = size;
+  specpdl = specpdl_ptr = pdlvec + 1;
 }
 
 /* static struct handler handlerlist_sentinel; */
@@ -1985,7 +1989,7 @@ it defines a macro.  */)
 
   /* This is to make sure that loadup.el gives a clear picture
      of what files are preloaded and when.  */
-  if (! NILP (Vpurify_flag))
+  if (will_dump)
     error ("Attempt to autoload %s while preparing to dump",
 	   SDATA (SYMBOL_NAME (funname)));
 
@@ -4030,8 +4034,6 @@ alist of active lexical bindings.  */);
   Vautoload_queue = Qnil;
   staticpro (&Vsignaling_function);
   Vsignaling_function = Qnil;
-
-  inhibit_lisp_code = Qnil;
 
   defsubr (&Sor);
   defsubr (&Sand);

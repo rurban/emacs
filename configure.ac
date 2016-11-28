@@ -2164,6 +2164,10 @@ if test "${system_malloc}" != yes && test "${doug_lea_malloc}" != yes \
   hybrid_malloc=yes
 fi
 
+## XXX
+hybrid_malloc=no
+system_malloc=yes
+
 GMALLOC_OBJ=
 HYBRID_MALLOC=
 if test "${system_malloc}" = "yes"; then

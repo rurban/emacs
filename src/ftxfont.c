@@ -28,6 +28,7 @@ along with GNU Emacs.  If not, see <http://www.gnu.org/licenses/>.  */
 #include "frame.h"
 #include "blockinput.h"
 #include "font.h"
+#include "pdumper.h"
 
 /* FTX font driver.  */
 
@@ -369,9 +370,17 @@ struct font_driver const ftxfont_driver =
   .combining_capability = ftfont_combining_capability,
   };
 
+static void syms_of_ftxfont_for_pdumper (void);
+
 void
 syms_of_ftxfont (void)
 {
   DEFSYM (Qftx, "ftx");
+  pdumper_do_now_and_after_load (syms_of_ftxfont_for_pdumper);
+}
+
+static void
+syms_of_ftxfont_for_pdumper (void)
+{
   register_font_driver (&ftxfont_driver, NULL);
 }

@@ -398,7 +398,7 @@ base_obj = dispnew.o frame.o scroll.o xdisp.o menu.o $(XMENU_OBJ) window.o \
 	buffer.o filelock.o insdel.o marker.o \
 	minibuf.o fileio.o dired.o \
 	cmds.o casetab.o casefiddle.o indent.o search.o regex.o undo.o \
-	alloc.o data.o doc.o editfns.o callint.o \
+	alloc.o pdumper.o data.o doc.o editfns.o callint.o \
 	eval.o floatfns.o fns.o font.o print.o lread.o $(MODULES_OBJ) \
 	syntax.o $(UNEXEC_OBJ) bytecode.o \
 	process.o gnutls.o callproc.o \
@@ -600,14 +600,28 @@ LIBEGNU_ARCHIVE = $(lib)/lib$(if $(HYBRID_MALLOC),e)gnu.a
 $(LIBEGNU_ARCHIVE): $(config_h)
 	$(MAKE) -C $(lib) all
 
+EMACS_DEPS_PRE=$(LIBXMENU) $(ALLOBJS)
+EMACS_DEPS_POST=$(LIBEGNU_ARCHIVE) $(EMACSRES) ${charsets} ${charscript}
+BUILD_EMACS_PRE=$(AM_V_CCLD)$(CC) $(ALL_CFLAGS) $(TEMACS_LDFLAGS) $(LDFLAGS) \
+	  -o $@ $(ALLOBJS)
+BUILD_EMACS_POST=$(LIBEGNU_ARCHIVE) $(W32_RES_LINK) $(LIBES)
+
+## We hash this file to generate the build fingerprint
+temacs.in$(EXEEXT): $(EMACS_DEPS_PRE) fingerprint-dummy.o $(EMACS_DEPS_POST)
+	$(BUILD_EMACS_PRE) fingerprint-dummy.o $(BUILD_EMACS_POST)
+
+$(libsrc)/make-fingerprint$(EXEEXT): $(libsrc)/make-fingerprint.c $(lib)/libgnu.a
+	$(MAKE) -C $(libsrc) make-fingerprint$(EXEEXT)
+
+fingerprint.c: temacs.in$(EXEEXT) $(libsrc)/make-fingerprint$(EXEEXT)
+	$(libsrc)/make-fingerprint$(EXEEXT) temacs.in$(EEXIST) > fingerprint.c
+
 ## We have to create $(etc) here because init_cmdargs tests its
 ## existence when setting Vinstallation_directory (FIXME?).
 ## This goes on to affect various things, and the emacs binary fails
 ## to start if Vinstallation_directory has the wrong value.
-temacs$(EXEEXT): $(LIBXMENU) $(ALLOBJS) \
-	         $(LIBEGNU_ARCHIVE) $(EMACSRES) ${charsets} ${charscript}
-	$(AM_V_CCLD)$(CC) $(ALL_CFLAGS) $(TEMACS_LDFLAGS) $(LDFLAGS) \
-	  -o temacs $(ALLOBJS) $(LIBEGNU_ARCHIVE) $(W32_RES_LINK) $(LIBES)
+temacs$(EXEEXT): $(EMACS_DEPS_PRE) fingerprint.o $(EMACS_DEPS_POST)
+	$(BUILD_EMACS_PRE) fingerprint.o $(BUILD_EMACS_POST)
 	$(MKDIR_P) $(etc)
 ifneq ($(CANNOT_DUMP),yes)
   ifneq ($(PAXCTL_notdumped),)
@@ -649,6 +663,7 @@ ns-app: emacs$(EXEEXT)
 
 mostlyclean:
 	rm -f temacs$(EXEEXT) core *.core \#* *.o
+	rm -f temacs.in$(EXEEXT) fingerprint.c
 	rm -f ../etc/DOC
 	rm -f bootstrap-emacs$(EXEEXT) emacs-$(version)$(EXEEXT)
 	rm -f buildobj.h

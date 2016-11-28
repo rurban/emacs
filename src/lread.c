@@ -42,6 +42,7 @@ along with GNU Emacs.  If not, see <http://www.gnu.org/licenses/>.  */
 #include "systime.h"
 #include "termhooks.h"
 #include "blockinput.h"
+#include "pdumper.h"
 #include <c-ctype.h>
 
 #ifdef MSDOS
@@ -1824,7 +1825,7 @@ readevalloop (Lisp_Object readcharfun,
 	     ? Qnil : list1 (Qt)));
 
   /* Try to ensure sourcename is a truename, except whilst preloading.  */
-  if (NILP (Vpurify_flag)
+  if (!will_dump
       && !NILP (sourcename) && !NILP (Ffile_name_absolute_p (sourcename))
       && !NILP (Ffboundp (Qfile_truename)))
     sourcename = call1 (Qfile_truename, sourcename) ;
@@ -4003,13 +4004,6 @@ usage: (unintern NAME OBARRAY)  */)
   if (SYMBOLP (name) && !EQ (name, tem))
     return Qnil;
 
-  /* There are plenty of other symbols which will screw up the Emacs
-     session if we unintern them, as well as even more ways to use
-     `setq' or `fset' or whatnot to make the Emacs session
-     unusable.  Let's not go down this silly road.  --Stef  */
-  /* if (EQ (tem, Qnil) || EQ (tem, Qt))
-       error ("Attempt to unintern t or nil"); */
-
   XSYMBOL (tem)->interned = SYMBOL_UNINTERNED;
 
   hash = oblookup_last_bucket_number;
@@ -4125,7 +4119,7 @@ OBARRAY defaults to the value of `obarray'.  */)
 #define OBARRAY_SIZE 15121
 
 void
-init_obarray (void)
+init_obarray_once (void)
 {
   Vobarray = Fmake_vector (make_number (OBARRAY_SIZE), make_number (0));
   initial_obarray = Vobarray;
@@ -4146,12 +4140,15 @@ init_obarray (void)
   make_symbol_constant (Qt);
   XSYMBOL (Qt)->declared_special = true;
 
-  /* Qt is correct even if CANNOT_DUMP.  loadup.el will set to nil at end.  */
+  /* Qt is correct even if not dumping.  loadup.el will set to nil at end.  */
   Vpurify_flag = Qt;
 
   DEFSYM (Qvariable_documentation, "variable-documentation");
 }
+
 
+int ndefsubr;
+
 void
 defsubr (struct Lisp_Subr *sname)
 {
@@ -4160,6 +4157,7 @@ defsubr (struct Lisp_Subr *sname)
   XSETPVECTYPE (sname, PVEC_SUBR);
   XSETSUBR (tem, sname);
   set_symbol_function (sym, tem);
+  ++ndefsubr;
 }
 
 #ifdef NOTDEF /* Use fset in subr.el now!  */
@@ -4305,36 +4303,28 @@ static Lisp_Object
 load_path_default (void)
 {
   Lisp_Object lpath = Qnil;
-  const char *normal;
+  const char *normal = PATH_LOADSEARCH;
+  const char *loadpath = NULL;
 
-#ifdef CANNOT_DUMP
 #ifdef HAVE_NS
-  const char *loadpath = ns_load_path ();
+  loadpath = ns_load_path ();
 #endif
+
+  if (will_dump)
+    /* PATH_DUMPLOADSEARCH is the lisp dir in the source directory.
+       We used to add ../lisp (ie the lisp dir in the build
+       directory) at the front here, but that should not be
+       necessary, since in out of tree builds lisp/ is empty, save
+       for Makefile.  */
+    return decode_env_path (0, PATH_DUMPLOADSEARCH, 0);
 
   normal = PATH_LOADSEARCH;
   if (!NILP (Vinstallation_directory)) normal = PATH_DUMPLOADSEARCH;
 
-#ifdef HAVE_NS
   lpath = decode_env_path (0, loadpath ? loadpath : normal, 0);
-#else
-  lpath = decode_env_path (0, normal, 0);
-#endif
 
-#else  /* !CANNOT_DUMP */
-
-  normal = NILP (Vpurify_flag) ? PATH_LOADSEARCH : PATH_DUMPLOADSEARCH;
-
-  if (initialized)
+  if (!NILP (Vinstallation_directory))
     {
-#ifdef HAVE_NS
-      const char *loadpath = ns_load_path ();
-      lpath = decode_env_path (0, loadpath ? loadpath : normal, 0);
-#else
-      lpath = decode_env_path (0, normal, 0);
-#endif
-      if (!NILP (Vinstallation_directory))
-        {
           Lisp_Object tem, tem1;
 
           /* Add to the path the lisp subdir of the installation
@@ -4418,17 +4408,6 @@ load_path_default (void)
             } /* Vinstallation_directory != Vsource_directory */
 
         } /* if Vinstallation_directory */
-    }
-  else                          /* !initialized */
-    {
-      /* NORMAL refers to PATH_DUMPLOADSEARCH, ie the lisp dir in the
-         source directory.  We used to add ../lisp (ie the lisp dir in
-         the build directory) at the front here, but that should not
-         be necessary, since in out of tree builds lisp/ is empty, save
-         for Makefile.  */
-      lpath = decode_env_path (0, normal, 0);
-    }
-#endif /* !CANNOT_DUMP */
 
   return lpath;
 }
@@ -4439,11 +4418,7 @@ init_lread (void)
   /* First, set Vload_path.  */
 
   /* Ignore EMACSLOADPATH when dumping.  */
-#ifdef CANNOT_DUMP
-  bool use_loadpath = true;
-#else
-  bool use_loadpath = NILP (Vpurify_flag);
-#endif
+  bool use_loadpath = !will_dump;
 
   if (use_loadpath && egetenv ("EMACSLOADPATH"))
     {
@@ -4494,7 +4469,7 @@ init_lread (void)
       load_path_check (Vload_path);
 
       /* Add the site-lisp directories at the front.  */
-      if (initialized && !no_site_lisp && PATH_SITELOADSEARCH[0] != '\0')
+      if (!will_dump && !no_site_lisp && PATH_SITELOADSEARCH[0] != '\0')
         {
           Lisp_Object sitelisp;
           sitelisp = decode_env_path (0, PATH_SITELOADSEARCH, 0);

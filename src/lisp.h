@@ -347,9 +347,13 @@ error !;
      (struct Lisp_Symbol *) ((intptr_t) XLI (a) - Lisp_Symbol \
 			     + (char *) lispsym))
 # define lisp_h_XTYPE(a) ((enum Lisp_Type) (XLI (a) & ~VALMASK))
+#if 0 /* XXX */
 # define lisp_h_XUNTAG(a, type) \
     __builtin_assume_aligned ((void *) (intptr_t) (XLI (a) - (type)), \
-			      GCALIGNMENT)
+                              GCALIGNMENT)
+#else
+# define lisp_h_XUNTAG(a, type)  ((void *) (intptr_t) (XLI (a) - (type)))
+#endif
 #endif
 
 /* When compiling via gcc -O0, define the key operations as macros, as
@@ -570,15 +574,41 @@ extern void char_table_set (Lisp_Object, int, Lisp_Object);
 extern _Noreturn void wrong_type_argument (Lisp_Object, Lisp_Object);
 
 
-#ifdef CANNOT_DUMP
-enum { might_dump = false };
-#elif defined DOUG_LEA_MALLOC
-/* Defined in emacs.c.  */
-extern bool might_dump;
+extern struct gflags {
+  /* Set after Emacs has started up the first time.
+     Prevents reinitialization of the Lisp world and keymaps
+     on subsequent starts.  */
+  bool initialized_ : 1;
+  /* True means this Emacs instance was born to dump.  */
+  bool will_dump_ : 1;
+  bool will_dump_with_pdumper_ : 1;
+#ifndef CANNOT_DUMP
+  bool will_dump_with_unexec_ : 1;
 #endif
-/* True means Emacs has already been initialized.
-   Used during startup to detect startup of dumped Emacs.  */
-extern bool initialized;
+#ifndef CANNOT_DUMP
+  /* Set in an Emacs process that has been restored from an unexec
+     dump.  */
+  bool dumped_with_unexec_ : 1;
+#endif
+  /* Set in an Emacs process that has been restored from a portable
+     dump.  */
+  bool dumped_with_pdumper_ : 1;
+} gflags;
+
+#define CONST_GFLAGS ((const struct gflags *)(&gflags))
+
+#define initialized CONST_GFLAGS->initialized_
+#define will_dump CONST_GFLAGS->will_dump_
+#define will_dump_with_pdumper CONST_GFLAGS->will_dump_with_pdumper_
+#ifdef CANNOT_DUMP
+# define will_dump_with_unexec false
+# define dumped_with_unexec false
+#else
+# define will_dump_with_unexec CONST_GFLAGS->will_dump_with_unexec_
+# define dumped_with_unexec CONST_GFLAGS->dumped_with_unexec_
+#endif
+
+#define dumped_with_pdumper CONST_GFLAGS->dumped_with_pdumper_
 
 /* Defined in floatfns.c.  */
 extern double extract_float (Lisp_Object);
@@ -773,6 +803,19 @@ struct Lisp_Symbol
 #ifndef DEFINE_NON_NIL_Q_SYMBOL_MACROS
 # define DEFINE_NON_NIL_Q_SYMBOL_MACROS true
 #endif
+
+/* True if N is a power of 2.  N should be positive.  */
+
+#define POWER_OF_2(n) (((n) & ((n) - 1)) == 0)
+
+/* Return X rounded to the next multiple of Y.  Y should be positive,
+   and Y - 1 + X should not overflow.  Arguments should not have side
+   effects, as they are evaluated more than once.  Tune for Y being a
+   power of 2.  */
+
+#define ROUNDUP(x, y) (POWER_OF_2 (y)					\
+                       ? ((y) - 1 + (x)) & ~ ((y) - 1)			\
+                       : ((y) - 1 + (x)) - ((y) - 1 + (x)) % (y))
 
 #include "globals.h"
 
@@ -1421,7 +1464,7 @@ PSEUDOVECTOR_TYPE (struct Lisp_Vector *v)
 
 /* Can't be used with PVEC_NORMAL_VECTOR.  */
 INLINE bool
-PSEUDOVECTOR_TYPEP (struct vectorlike_header *a, enum pvec_type code)
+PSEUDOVECTOR_TYPEP (const struct vectorlike_header *a, enum pvec_type code)
 {
   /* We don't use PSEUDOVECTOR_TYPE here so as to avoid a shift
    * operation when `code' is known.  */
@@ -2398,6 +2441,9 @@ XFINALIZER (Lisp_Object a)
   return XUNTAG (a, Lisp_Misc);
 }
 
+extern struct Lisp_Finalizer finalizers;
+extern struct Lisp_Finalizer doomed_finalizers;
+
 /* A miscellaneous object, when it's on the free list.  */
 struct Lisp_Free
   {
@@ -2851,6 +2897,16 @@ CHECK_NUMBER_CDR (Lisp_Object x)
   XSETCDR (x, tmp);
 }
 
+
+/* If we're not dumping and we might be using the portable dumper, try
+   to bunch all the subr structures together for more efficient dump
+   loading.  */
+#ifdef CANNOT_DUMP
+# define SUBR_SECTION_ATTRIBUTE ATTRIBUTE_SECTION (".subrs")
+#else
+# define SUBR_SECTION_ATTRIBUTE
+#endif
+
 /* Define a built-in function for calling from Lisp.
  `lname' should be the name to give the function in Lisp,
     as a null-terminated C string.
@@ -2881,6 +2937,7 @@ CHECK_NUMBER_CDR (Lisp_Object x)
 #ifdef _MSC_VER
 #define DEFUN(lname, fnname, sname, minargs, maxargs, intspec, doc)	\
    Lisp_Object fnname DEFUN_ARGS_ ## maxargs ;				\
+   SUBR_SECTION_ATTRIBUTE                                               \
    static struct Lisp_Subr alignas (GCALIGNMENT) sname =		\
    { { (PVEC_SUBR << PSEUDOVECTOR_AREA_BITS)				\
        | (sizeof (struct Lisp_Subr) / sizeof (EMACS_INT)) },		\
@@ -2889,6 +2946,7 @@ CHECK_NUMBER_CDR (Lisp_Object x)
    Lisp_Object fnname
 #else  /* not _MSC_VER */
 #define DEFUN(lname, fnname, sname, minargs, maxargs, intspec, doc)	\
+   SUBR_SECTION_ATTRIBUTE                                               \
    static struct Lisp_Subr alignas (GCALIGNMENT) sname =		\
      { { PVEC_SUBR << PSEUDOVECTOR_AREA_BITS },				\
        { .a ## maxargs = fnname },					\
@@ -3142,6 +3200,11 @@ extern Lisp_Object Vascii_canon_table;
 /* Call staticpro (&var) to protect static variable `var'.  */
 
 void staticpro (Lisp_Object *);
+
+enum { NSTATICS = 2048 };
+extern Lisp_Object *staticvec[NSTATICS];
+extern int staticidx;
+
 
 /* Forward declarations for prototypes.  */
 struct window;
@@ -3354,9 +3417,11 @@ extern void syms_of_syntax (void);
 enum { NEXT_ALMOST_PRIME_LIMIT = 11 };
 extern EMACS_INT next_almost_prime (EMACS_INT) ATTRIBUTE_CONST;
 extern Lisp_Object larger_vector (Lisp_Object, ptrdiff_t, ptrdiff_t);
-extern void sweep_weak_hash_tables (void);
+extern void mark_and_sweep_weak_hash_tables (void);
 EMACS_UINT hash_string (char const *, ptrdiff_t);
 EMACS_UINT sxhash (Lisp_Object, int);
+EMACS_UINT hashfn_eql (struct hash_table_test *ht, Lisp_Object key);
+EMACS_UINT hashfn_equal (struct hash_table_test *ht, Lisp_Object key);
 Lisp_Object make_hash_table (struct hash_table_test, EMACS_INT, float, float,
 			     Lisp_Object, bool);
 ptrdiff_t hash_lookup (struct Lisp_Hash_Table *, Lisp_Object, EMACS_UINT *);
@@ -3519,6 +3584,9 @@ extern Lisp_Object zero_vector;
 extern EMACS_INT consing_since_gc;
 extern EMACS_INT gc_relative_threshold;
 extern EMACS_INT memory_full_cons_threshold;
+#ifdef ENABLE_CHECKING
+extern Lisp_Object Vdead;
+#endif
 extern Lisp_Object list1 (Lisp_Object);
 extern Lisp_Object list2 (Lisp_Object, Lisp_Object);
 extern Lisp_Object list3 (Lisp_Object, Lisp_Object, Lisp_Object);
@@ -3527,6 +3595,21 @@ extern Lisp_Object list5 (Lisp_Object, Lisp_Object, Lisp_Object, Lisp_Object,
 			  Lisp_Object);
 enum constype {CONSTYPE_HEAP, CONSTYPE_PURE};
 extern Lisp_Object listn (enum constype, ptrdiff_t, Lisp_Object, ...);
+
+enum gc_root_type {
+  GC_ROOT_STATICPRO,
+  GC_ROOT_BUFFER_LOCAL_DEFAULT,
+  GC_ROOT_BUFFER_LOCAL_NAME,
+  GC_ROOT_C_SYMBOL
+};
+
+struct gc_root_visitor {
+  void (*visit)(Lisp_Object *root_ptr,
+                enum gc_root_type type,
+                void *data);
+  void *data;
+};
+extern void visit_static_gc_roots (struct gc_root_visitor visitor);
 
 /* Build a frequently used 2/3/4-integer lists.  */
 
@@ -3556,6 +3639,7 @@ extern Lisp_Object make_string (const char *, ptrdiff_t);
 extern Lisp_Object make_formatted_string (char *, const char *, ...)
   ATTRIBUTE_FORMAT_PRINTF (2, 3);
 extern Lisp_Object make_unibyte_string (const char *, ptrdiff_t);
+extern ptrdiff_t vector_nbytes (struct Lisp_Vector *v);
 
 /* Make unibyte string from C string when the length isn't known.  */
 
@@ -3755,7 +3839,7 @@ extern Lisp_Object string_to_number (char const *, int, bool);
 extern void map_obarray (Lisp_Object, void (*) (Lisp_Object, Lisp_Object),
                          Lisp_Object);
 extern void dir_warning (const char *, Lisp_Object);
-extern void init_obarray (void);
+extern void init_obarray_once (void);
 extern void init_lread (void);
 extern void syms_of_lread (void);
 
@@ -3775,7 +3859,6 @@ intern_c_string (const char *str)
 extern Lisp_Object Vautoload_queue;
 extern Lisp_Object Vrun_hooks;
 extern Lisp_Object Vsignaling_function;
-extern Lisp_Object inhibit_lisp_code;
 
 /* To run a normal hook, use the appropriate function from the list below.
    The calling convention:
@@ -3877,7 +3960,7 @@ extern _Noreturn void time_overflow (void);
 extern Lisp_Object make_buffer_string (ptrdiff_t, ptrdiff_t, bool);
 extern Lisp_Object make_buffer_string_both (ptrdiff_t, ptrdiff_t, ptrdiff_t,
 					    ptrdiff_t, bool);
-extern void init_editfns (bool);
+extern void init_editfns (void);
 extern void syms_of_editfns (void);
 
 /* Defined in buffer.c.  */
@@ -3892,7 +3975,7 @@ extern bool overlay_touches_p (ptrdiff_t);
 extern Lisp_Object other_buffer_safely (Lisp_Object);
 extern Lisp_Object get_truename_buffer (Lisp_Object);
 extern void init_buffer_once (void);
-extern void init_buffer (int);
+extern void init_buffer (void);
 extern void syms_of_buffer (void);
 extern void keys_of_buffer (void);
 
@@ -4036,6 +4119,7 @@ extern void store_in_alist (Lisp_Object *, Lisp_Object, Lisp_Object);
 extern Lisp_Object do_switch_frame (Lisp_Object, int, int, Lisp_Object);
 extern Lisp_Object get_frame_param (struct frame *, Lisp_Object);
 extern void frames_discard_buffer (Lisp_Object);
+extern void init_frame_once (void);
 extern void syms_of_frame (void);
 
 /* Defined in emacs.c.  */
