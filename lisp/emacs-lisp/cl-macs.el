@@ -2656,6 +2656,8 @@ non-nil value, that slot cannot be set via `setf'.
 				  descs)))
 	      (t
 	       (error "Structure option %s unrecognized" opt)))))
+    (if (eq type 'record)
+        (setq named t))
     (unless (or include-name type)
       (setq include-name cl--struct-default-parent))
     (when include-name (setq include (cl--struct-get-class include-name)))
@@ -2684,7 +2686,7 @@ non-nil value, that slot cannot be set via `setf'.
 	  (if (cl--struct-class-named include) (setq tag name named t)))
       (if type
 	  (progn
-	    (or (memq type '(vector list))
+	    (or (memq type '(vector list record))
 		(error "Invalid :type specifier: %s" type))
 	    (if named (setq tag name)))
 	(setq named 'true)))
@@ -2700,6 +2702,9 @@ non-nil value, that slot cannot be set via `setf'.
                              `(and (vectorp cl-x)
                                    (>= (length cl-x) ,(length descs))
                                    (memq (aref cl-x ,pos) ,tag-symbol)))
+                            ((eq type 'record)
+                             `(and (recordp cl-x)
+                                   (memq (type-of cl-x) ,tag-symbol)))
                             ((= pos 0) `(memq (car-safe cl-x) ,tag-symbol))
                             (t `(and (consp cl-x)
 				     (memq (nth ,pos cl-x) ,tag-symbol))))))
@@ -2740,7 +2745,7 @@ non-nil value, that slot cannot be set via `setf'.
 			      (list `(or ,pred-check
                                          (signal 'wrong-type-argument
                                                  (list ',name cl-x)))))
-                       ,(if (memq type '(nil vector)) `(aref cl-x ,pos)
+                       ,(if (memq type '(nil vector record)) `(aref cl-x ,pos)
                           (if (= pos 0) '(car cl-x)
                             `(nth ,pos cl-x))))
                     forms)
@@ -2866,6 +2871,14 @@ is a shorthand for (NAME NAME)."
                      ,pat)))
            fields)))
 
+(defun cl--defstruct-predicate (type)
+  (let ((cons (assq type `((list . consp)
+                           (vector . vectorp)
+                           (record . recordp)))))
+    (if cons
+        (cdr cons)
+      'vectorp)))
+
 (defun cl--pcase-mutually-exclusive-p (orig pred1 pred2)
   "Extra special cases for `cl-typep' predicates."
   (let* ((x1 pred1) (x2 pred2)
@@ -2888,14 +2901,12 @@ is a shorthand for (NAME NAME)."
                           (memq c2 (cl--struct-all-parents c1)))))))
      (let ((c1 (and (symbolp t1) (cl--find-class t1))))
        (and c1 (cl--struct-class-p c1)
-            (funcall orig (if (eq 'list (cl-struct-sequence-type t1))
-                              'consp 'vectorp)
+            (funcall orig (cl--defstruct-predicate t1)
                      pred2)))
      (let ((c2 (and (symbolp t2) (cl--find-class t2))))
        (and c2 (cl--struct-class-p c2)
             (funcall orig pred1
-                     (if (eq 'list (cl-struct-sequence-type t2))
-                         'consp 'vectorp))))
+                     (cl--defstruct-predicate t2))))
      (funcall orig pred1 pred2))))
 (advice-add 'pcase--mutually-exclusive-p
             :around #'cl--pcase-mutually-exclusive-p)
@@ -2903,8 +2914,8 @@ is a shorthand for (NAME NAME)."
 
 (defun cl-struct-sequence-type (struct-type)
   "Return the sequence used to build STRUCT-TYPE.
-STRUCT-TYPE is a symbol naming a struct type.  Return `vector' or
-`list', or nil if STRUCT-TYPE is not a struct type. "
+STRUCT-TYPE is a symbol naming a struct type.  Return `record',
+`vector`, or `list' if STRUCT-TYPE is a struct type, nil otherwise."
   (declare (side-effect-free t) (pure t))
   (cl--struct-class-type (cl--struct-get-class struct-type)))
 
