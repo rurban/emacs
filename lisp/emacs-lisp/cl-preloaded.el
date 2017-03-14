@@ -64,7 +64,7 @@
       ;; cl--slot-descriptor.
       ;; BEWARE: Obviously, it's important to keep the two in sync!
       (lambda (name &optional initform type props)
-        (vector 'cl-struct-cl-slot-descriptor
+        (record 'cl-struct-cl-slot-descriptor
                 name initform type props)))
 
 (defun cl--struct-get-class (name)
@@ -101,7 +101,7 @@
 (defun cl--struct-register-child (parent tag)
   ;; Can't use (cl-typep parent 'cl-structure-class) at this stage
   ;; because `cl-structure-class' is defined later.
-  (while (vectorp parent)
+  (while (recordp parent)
     (add-to-list (cl--struct-class-children-sym parent) tag)
     ;; Only register ourselves as a child of the leftmost parent since structs
     ;; can only only have one parent.

@@ -2656,8 +2656,6 @@ non-nil value, that slot cannot be set via `setf'.
 				  descs)))
 	      (t
 	       (error "Structure option %s unrecognized" opt)))))
-    (if (eq type 'record)
-        (setq named t))
     (unless (or include-name type)
       (setq include-name cl--struct-default-parent))
     (when include-name (setq include (cl--struct-get-class include-name)))
@@ -2698,13 +2696,13 @@ non-nil value, that slot cannot be set via `setf'.
 				       (length (memq (assq 'cl-tag-slot descs)
 						     descs)))))
 			   (cond
-                            ((memq type '(nil vector))
+                            ((memq type '(nil record))
+                             `(and (recordp cl-x)
+                                   (memq (type-of cl-x) ,tag-symbol)))
+                            ((eq type 'vector)
                              `(and (vectorp cl-x)
                                    (>= (length cl-x) ,(length descs))
                                    (memq (aref cl-x ,pos) ,tag-symbol)))
-                            ((eq type 'record)
-                             `(and (recordp cl-x)
-                                   (memq (type-of cl-x) ,tag-symbol)))
                             ((= pos 0) `(memq (car-safe cl-x) ,tag-symbol))
                             (t `(and (consp cl-x)
 				     (memq (nth ,pos cl-x) ,tag-symbol))))))
@@ -2813,7 +2811,7 @@ non-nil value, that slot cannot be set via `setf'.
                     (format "Constructor for objects of type `%s'." name))
                  ,@(if (cl--safe-expr-p `(progn ,@(mapcar #'cl-second descs)))
                        '((declare (side-effect-free t))))
-                 (,(or type #'vector) ,@make))
+                 (,(or type #'record) ,@make))
               forms)))
     (if print-auto (nconc print-func (list '(princ ")" cl-s) t)))
     ;; Don't bother adding to cl-custom-print-functions since it's not used
@@ -2877,7 +2875,7 @@ is a shorthand for (NAME NAME)."
                            (record . recordp)))))
     (if cons
         (cdr cons)
-      'vectorp)))
+      'recordp)))
 
 (defun cl--pcase-mutually-exclusive-p (orig pred1 pred2)
   "Extra special cases for `cl-typep' predicates."
