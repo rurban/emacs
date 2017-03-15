@@ -353,6 +353,7 @@ OPTION_DEFAULT_ON([gconf],[don't compile with GConf support])
 OPTION_DEFAULT_ON([gsettings],[don't compile with GSettings support])
 OPTION_DEFAULT_ON([selinux],[don't compile with SELinux support])
 OPTION_DEFAULT_ON([gnutls],[don't use -lgnutls for SSL/TLS support])
+OPTION_DEFAULT_ON([nettle],[don't use -lhogweed (libnettle) for cryptographic support])
 OPTION_DEFAULT_ON([zlib],[don't compile with zlib decompression support])
 OPTION_DEFAULT_OFF([modules],[compile with dynamic modules support])
 OPTION_DEFAULT_ON([threads],[don't compile with elisp threading support])
@@ -2794,6 +2795,25 @@ fi
 
 AC_SUBST(LIBSYSTEMD_LIBS)
 AC_SUBST(LIBSYSTEMD_CFLAGS)
+
+HAVE_NETTLE=no
+if test "${with_nettle}" = "yes" ; then
+  PKG_CHECK_MODULES([LIBNETTLE], [hogweed >= 2.7], HAVE_NETTLE=yes, HAVE_NETTLE=no)
+  if test "${HAVE_NETTLE}" = "yes"; then
+    AC_DEFINE(HAVE_NETTLE, 1, [Define if using libnettle+libhogweed.])
+  fi
+
+  # Windows loads libnettle dynamically
+  if test "${opsys}" = "mingw32"; then
+    LIBNETTLE_LIBS=
+  else
+    CFLAGS="$CFLAGS $LIBNETTLE_CFLAGS"
+    LIBS="$LIBNETTLE_LIBS $LIBS"
+  fi
+fi
+
+AC_SUBST(LIBNETTLE_LIBS)
+AC_SUBST(LIBNETTLE_CFLAGS)
 
 NOTIFY_OBJ=
 NOTIFY_SUMMARY=no
@@ -5315,6 +5335,7 @@ AS_ECHO(["  Does Emacs use -lXaw3d?                                 ${HAVE_XAW3D
   Does Emacs use access control lists?                    ${ACL_SUMMARY}
   Does Emacs use -lselinux?                               ${HAVE_LIBSELINUX}
   Does Emacs use -lgnutls?                                ${HAVE_GNUTLS}
+  Does Emacs use -lhogweed (libnettle)?                   ${HAVE_NETTLE}
   Does Emacs use -lxml2?                                  ${HAVE_LIBXML2}
   Does Emacs use -lfreetype?                              ${HAVE_FREETYPE}
   Does Emacs use -lm17n-flt?                              ${HAVE_M17N_FLT}

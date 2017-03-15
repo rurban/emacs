@@ -93,6 +93,10 @@ along with GNU Emacs.  If not, see <http://www.gnu.org/licenses/>.  */
 #include "getpagesize.h"
 #include "gnutls.h"
 
+#ifdef HAVE_NETTLE
+#include "nettle.h"
+#endif
+
 #if (defined PROFILING \
      && (defined __FreeBSD__ || defined GNU_LINUX || defined __MINGW32__))
 # include <sys/gmon.h>
@@ -1367,6 +1371,10 @@ Using an Emacs configured with --with-x-toolkit=lucid does not have this problem
 
 #ifdef HAVE_KQUEUE
   globals_of_kqueue ();
+#endif
+
+#ifdef HAVE_NETTLE
+      syms_of_nettle ();
 #endif
 
 #ifdef HAVE_GFILENOTIFY
