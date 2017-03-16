@@ -2604,11 +2604,24 @@ non-nil value, that slot cannot be set via `setf'.
 	 (print-func nil) (print-auto nil)
 	 (safety (if (cl--compiling-file) cl--optimize-safety 3))
 	 (include nil)
-	 (tag (intern (format "cl-struct-%s" name)))
+         ;; There are 4 types of structs:
+         ;; - `vector' type: means we should use a vector, which can come
+         ;;   with or without a tag `name', which is usually in slot 0
+         ;;   but obeys :initial-offset.
+         ;; - `list' type: same as `vector' but using lists.
+         ;; - `record' type: means we should use a record, which necessarily
+         ;;   comes tagged in slot 0.  Currently we'll use the `name' as
+         ;;   the tag, but we may want to change it so that the class object
+         ;;   is used as the tag.
+         ;; - nil type: this is the "pre-record default", which uses a vector
+         ;;   with a tag in slot 0 which is a symbol of the form
+         ;;   `cl-struct-NAME'.  We need to still support this for backward
+         ;;   compatibility with old .elc files.
+	 (tag name)
 	 (tag-symbol (intern (format "cl-struct-%s-tags" name)))
 	 (include-descs nil)
 	 (include-name nil)
-	 (type nil)
+	 (type nil)         ;nil here means not specified explicitly.
 	 (named nil)
 	 (forms nil)
          (docstring (if (stringp (car descs)) (pop descs)))
@@ -2648,7 +2661,9 @@ non-nil value, that slot cannot be set via `setf'.
 	      ((eq opt :print-function)
 	       (setq print-func (car args)))
 	      ((eq opt :type)
-	       (setq type (car args)))
+	       (setq type (car args))
+               (unless (memq type '(vector list))
+                 (error "Invalid :type specifier: %s" type)))
 	      ((eq opt :named)
 	       (setq named t))
 	      ((eq opt :initial-offset)
@@ -2680,13 +2695,11 @@ non-nil value, that slot cannot be set via `setf'.
 		    (pop include-descs)))
 	  (setq descs (append old-descs (delq (assq 'cl-tag-slot descs) descs))
 		type inc-type
-		named (if type (assq 'cl-tag-slot descs) 'true))
-	  (if (cl--struct-class-named include) (setq tag name named t)))
-      (if type
-	  (progn
-	    (or (memq type '(vector list record))
-		(error "Invalid :type specifier: %s" type))
-	    (if named (setq tag name)))
+		named (if (memq type '(vector list))
+                          (assq 'cl-tag-slot descs)
+                        'true))
+	  (if (cl--struct-class-named include) (setq named t)))
+      (unless type
 	(setq named 'true)))
     (or named (setq descs (delq (assq 'cl-tag-slot descs) descs)))
     (when (and (null predicate) named)
@@ -2696,9 +2709,8 @@ non-nil value, that slot cannot be set via `setf'.
 				       (length (memq (assq 'cl-tag-slot descs)
 						     descs)))))
 			   (cond
-                            ((memq type '(nil record))
-                             `(and (recordp cl-x)
-                                   (memq (type-of cl-x) ,tag-symbol)))
+                            ((null type) ;Record type.
+                             `(memq (type-of cl-x) ,tag-symbol))
                             ((eq type 'vector)
                              `(and (vectorp cl-x)
                                    (>= (length cl-x) ,(length descs))
@@ -2743,7 +2755,7 @@ non-nil value, that slot cannot be set via `setf'.
 			      (list `(or ,pred-check
                                          (signal 'wrong-type-argument
                                                  (list ',name cl-x)))))
-                       ,(if (memq type '(nil vector record)) `(aref cl-x ,pos)
+                       ,(if (memq type '(nil vector)) `(aref cl-x ,pos)
                           (if (= pos 0) '(car cl-x)
                             `(nth ,pos cl-x))))
                     forms)
@@ -2870,9 +2882,10 @@ is a shorthand for (NAME NAME)."
            fields)))
 
 (defun cl--defstruct-predicate (type)
-  (let ((cons (assq type `((list . consp)
-                           (vector . vectorp)
-                           (record . recordp)))))
+  (let ((cons (assq (cl-struct-sequence-type type)
+                    `((list . consp)
+                      (vector . vectorp)
+                      (nil . recordp)))))
     (if cons
         (cdr cons)
       'recordp)))

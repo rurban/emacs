@@ -1409,12 +1409,6 @@ CHECK_VECTOR (Lisp_Object x)
   CHECK_TYPE (VECTORP (x), Qvectorp, x);
 }
 
-INLINE void
-CHECK_RECORD_TYPE (Lisp_Object x)
-{
-  CHECK_SYMBOL (x);
-}
-
 
 /* A pseudovector is like a vector, but has other non-Lisp components.  */
 
@@ -2740,6 +2734,18 @@ INLINE bool
 RECORDP (Lisp_Object a)
 {
   return PSEUDOVECTORP (a, PVEC_RECORD);
+}
+
+INLINE void
+CHECK_RECORD (Lisp_Object x)
+{
+  CHECK_TYPE (RECORDP (x), Qrecordp, x);
+}
+
+INLINE void
+CHECK_RECORD_TYPE (Lisp_Object x)
+{
+  /* CHECK_SYMBOL (x); */
 }
 
 /* Test for image (image . spec)  */
